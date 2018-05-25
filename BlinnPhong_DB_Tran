@@ -1,0 +1,247 @@
+//Author : 高贺兵　 微信: 13671767104
+Shader "GHB/Character"
+{
+    Properties
+    {
+        _TexHair("Tex Hair",2D) = "white"{}
+        _TexFace("Tex Face",2D) = "white"{}
+        _TexUp("Tex Up",2D) = "white"{}
+        _TexDown("Tex Down",2D) = "white"{}
+        _RimLightSampler("RimLightSampler",2D) = "white"{}
+        _ColorfulPower("ColorfulPower",range(0,1)) = .5
+        _MaskHeadFace("MaskHeadFace",2D) = "white"{}
+        _MaskUp("MaskUp",2D) = "white"{}
+        _MaskDown("MaskDown",2D) = "white"{}
+        _Gloss("Gloss",Range(8,256)) = 27
+        _SpecularPower("SpecularPower",range(0,11)) = .3
+        _RimPower("RimPower",range(0,2)) = 2
+        _discard("Discard",range(0,.99)) = .2
+        [Enum(ID0,0,ID1,1,ID2,2,ID3,3,ID4,4)]_Texindex("Texindex",float) = 0
+    }
+    SubShader
+    {
+        Tags { "RenderType"="Transparent" "Queue"="Transparent"}
+        LOD 100
+        cull back
+        Pass
+        {
+            Tags{ "LightMode" = "ForwardBase" }
+            blend srcalpha oneminussrcalpha
+            cull off//back
+            ztest lequal
+            zwrite on
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            //#pragma target 3.0
+            #include "UnityCG.cginc"
+            #include "GHB.cginc"
+            sampler2D _TexHair; fixed4 _TexHair_ST;
+            sampler2D _TexFace; fixed4 _TexFace_ST;
+            sampler2D _TexUp;
+            sampler2D _TexDown;
+            sampler2D _RimLightSampler;
+            fixed _ColorfulPower;
+            sampler2D _MaskHeadFace;
+            sampler2D _MaskUp;
+            sampler2D _MaskDown;
+            fixed _SpecularPower;
+            fixed _Gloss;
+            fixed _RimPower;
+            fixed _Texindex;
+            fixed _discard;
+            struct a2v {
+                fixed4 vertex : POSITION;
+                fixed3 normal : NORMAL;
+                fixed4 texcoord : TEXCOORD0;
+                fixed texindex : TEXCOORD1;
+            };
+
+            struct v2f {
+                fixed4 vertex0 : SV_POSITION;
+                fixed2 uv0 : TEXCOORD0;
+                fixed3 worldpos0 : TEXCOORD1;
+                fixed3 normal0 : TEXCOORD2;
+                fixed texindex :TEXCOORD3;
+            };
+
+            v2f vert(a2v v)
+            {
+                v2f o;
+                o.vertex0 = UnityObjectToClipPos(v.vertex);
+                o.uv0 =  v.texcoord;
+                o.normal0 =  normalize(mul((fixed3x3)unity_ObjectToWorld,v.normal)); 
+                o.worldpos0 = mul(UNITY_MATRIX_M,v.vertex); 
+                o.texindex = v.texindex.x;
+                return o;
+            }
+
+            fixed4 frag(v2f i) : SV_Target 
+            {
+                fixed3 L = normalize(_WorldSpaceLightPos0.xyz);
+                fixed3 V = normalize(_WorldSpaceCameraPos.xyz - i.worldpos0);
+                fixed3 H = normalize(L + V);
+                fixed3 N = normalize(i.normal0);//影响平滑表现
+                fixed3 NH = saturate(dot(N , H));
+                fixed3 NL = saturate(dot(N,L));
+                fixed2 offsett = getBlink();
+                fixed4 texColor = (fixed4)0;
+                fixed3 maskColor = fixed3(0,0,0);
+                if( 0 == _Texindex) {
+                    if( .5 < i.texindex &&  i.texindex <= 1.5){
+                        texColor =  tex2D(_TexHair, TRANSFORM_TEX(i.uv0,_TexHair)).xyzw;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 1.5 < i.texindex &&   i.texindex <= 2.5){
+                        texColor = tex2D(_TexFace, TRANSFORM_TEX(i.uv0, _TexFace)+offsett).xyzw;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 2.5 < i.texindex &&   i.texindex <= 3.5){
+                        texColor = tex2D(_TexUp, i.uv0).xyzw;
+                        maskColor = tex2D(_MaskUp,i.uv0.xy).xyz;
+                    }else if ( 3.5 < i.texindex &&   i.texindex <= 4.5){
+                        texColor = tex2D(_TexDown, i.uv0).xyzw; 
+                        maskColor = tex2D(_MaskDown,i.uv0.xy).xyz;
+                    }
+                }else{
+                    if( 1 == _Texindex ){
+                        texColor =  tex2D(_TexHair, TRANSFORM_TEX(i.uv0,_TexHair)).xyzw;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 2 == _Texindex ){
+                        texColor = tex2D(_TexFace, TRANSFORM_TEX(i.uv0, _TexFace)+offsett).xyzw;;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 3 == _Texindex ){
+                        texColor = tex2D(_TexUp, i.uv0).xyzw;
+                        maskColor = tex2D(_MaskUp,i.uv0.xy).xyz;
+                    }else if ( 4 == _Texindex ){
+                        texColor = tex2D(_TexDown, i.uv0).xyzw; 
+                        maskColor = tex2D(_MaskDown,i.uv0.xy).xyz;
+                    }
+                }
+                 
+                fixed U = saturate(1- abs( NL ));
+                U = tex2D( _RimLightSampler, fixed2( U*.9, 0.25f ) ).r;
+                fixed3 cc = U * texColor.rgb *.15 ;
+
+                //fixed3 ambi = UNITY_LIGHTMODEL_AMBIENT.xyz * .1;
+                fixed3 diff = (texColor.rgb + cc) * pow( texColor.rgb,_ColorfulPower) ;//* NL;
+                fixed3 spec = texColor.rgb * pow(  NH , _Gloss ) * _SpecularPower* saturate( maskColor.r );
+                fixed3 rim =  texColor.rgb * saturate(1- NH * _RimPower) *  saturate(1- maskColor.r ) ;
+                clip(texColor.a - _discard);
+                fixed4 Lo = fixed4(  diff + spec +  rim  , texColor.a);
+                return     Lo;
+            }
+            ENDCG
+        }
+
+
+
+
+        Pass
+        {
+            Tags{ "LightMode" = "ForwardBase" }
+            blend srcalpha oneminussrcalpha
+            cull off
+            ztest lequal
+            zwrite off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            //#pragma target 3.0
+            #include "UnityCG.cginc"
+            #include "GHB.cginc"
+            sampler2D _TexHair; fixed4 _TexHair_ST;
+            sampler2D _TexFace; fixed4 _TexFace_ST;
+            sampler2D _TexUp;
+            sampler2D _TexDown;
+            sampler2D _RimLightSampler;
+            fixed _ColorfulPower;
+            sampler2D _MaskHeadFace;
+            sampler2D _MaskUp;
+            sampler2D _MaskDown;
+            fixed _SpecularPower;
+            fixed _Gloss;
+            fixed _RimPower;
+            fixed _Texindex;
+            fixed _discard;
+            struct a2v {
+                fixed4 vertex : POSITION;
+                fixed3 normal : NORMAL;
+                fixed4 texcoord : TEXCOORD0;
+                fixed texindex : TEXCOORD1;
+            };
+
+            struct v2f {
+                fixed4 vertex0 : SV_POSITION;
+                fixed2 uv0 : TEXCOORD0;
+                fixed3 worldpos0 : TEXCOORD1;
+                fixed3 normal0 : TEXCOORD2;
+                fixed texindex :TEXCOORD3;
+            };
+
+            v2f vert(a2v v)
+            {
+                v2f o;
+                o.vertex0 = UnityObjectToClipPos(v.vertex);
+                o.uv0 =  v.texcoord;
+                o.normal0 =  normalize(mul((fixed3x3)unity_ObjectToWorld,v.normal)); 
+                o.worldpos0 = mul(UNITY_MATRIX_M,v.vertex); 
+                o.texindex = v.texindex.x;
+                return o;
+            }
+
+            fixed4 frag(v2f i) : SV_Target 
+            {
+                fixed3 L = normalize(_WorldSpaceLightPos0.xyz);
+                fixed3 V = normalize(_WorldSpaceCameraPos.xyz - i.worldpos0);
+                fixed3 H = normalize(L + V);
+                fixed3 N = normalize(i.normal0);//影响平滑表现
+                fixed3 NH = saturate(dot(N , H));
+                fixed3 NL = saturate(dot(N,L));
+                fixed2 offsett = getBlink();
+                fixed4 texColor = (fixed4)0;
+                fixed3 maskColor = fixed3(0,0,0);
+                if( 0 == _Texindex) {
+                    if( .5 < i.texindex &&  i.texindex <= 1.5){
+                        texColor =  tex2D(_TexHair, TRANSFORM_TEX(i.uv0,_TexHair)).xyzw;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 1.5 < i.texindex &&   i.texindex <= 2.5){
+                        texColor = tex2D(_TexFace, TRANSFORM_TEX(i.uv0, _TexFace)+offsett).xyzw;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 2.5 < i.texindex &&   i.texindex <= 3.5){
+                        texColor = tex2D(_TexUp, i.uv0).xyzw;
+                        maskColor = tex2D(_MaskUp,i.uv0.xy).xyz;
+                    }else if ( 3.5 < i.texindex &&   i.texindex <= 4.5){
+                        texColor = tex2D(_TexDown, i.uv0).xyzw; 
+                        maskColor = tex2D(_MaskDown,i.uv0.xy).xyz;
+                    }
+                }else{
+                    if( 1 == _Texindex ){
+                        texColor =  tex2D(_TexHair, TRANSFORM_TEX(i.uv0,_TexHair)).xyzw;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 2 == _Texindex ){
+                        texColor = tex2D(_TexFace, TRANSFORM_TEX(i.uv0, _TexFace)+offsett).xyzw;;
+                        maskColor = tex2D(_MaskHeadFace,i.uv0.xy).xyz;
+                    }else if ( 3 == _Texindex ){
+                        texColor = tex2D(_TexUp, i.uv0).xyzw;
+                        maskColor = tex2D(_MaskUp,i.uv0.xy).xyz;
+                    }else if ( 4 == _Texindex ){
+                        texColor = tex2D(_TexDown, i.uv0).xyzw; 
+                        maskColor = tex2D(_MaskDown,i.uv0.xy).xyz;
+                    }
+                }
+                 
+                fixed U = saturate(1- abs( NL ));
+                U = tex2D( _RimLightSampler, fixed2( U*.9, 0.25f ) ).r;
+                fixed3 cc = U * texColor.rgb *0;//*.15 ;
+                clip(_discard - texColor.a );
+                //fixed3 ambi = UNITY_LIGHTMODEL_AMBIENT.xyz * .1;
+                fixed3 diff = (texColor.rgb + cc) * pow( texColor.rgb,_ColorfulPower) ;//* NL;
+                fixed3 spec = texColor.rgb * pow(  NH , _Gloss ) * _SpecularPower* saturate( maskColor.r );
+                fixed3 rim =  texColor.rgb * saturate(1- NH * _RimPower) *  saturate(1- maskColor.r ) ;
+                fixed4 Lo = fixed4(  diff + spec +  rim  , texColor.a);
+                return     Lo;
+            }
+            ENDCG
+        }
+    }
+    FallBack "Diffuse"
+}
